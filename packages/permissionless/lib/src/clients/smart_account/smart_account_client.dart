@@ -869,13 +869,7 @@ class SmartAccountClient {
     BigInt? preserveVerificationGasLimit,
     BigInt? preservePreVerificationGas,
   }) {
-    var buffered = estimate.withMultipliers(gasMultipliers);
-
-    // WebAuthn accounts require higher verification gas for P256 on-chain math
-    // when the RIP-7212 precompile is not available (~800k gas).
-    if (account.isWebAuthn) {
-      buffered = buffered.withMinimumVerificationGas();
-    }
+    final buffered = estimate.withMultipliers(gasMultipliers);
 
     // For paymaster gas limits:
     // 1. If userOp already has values (from paymaster stub), keep them
