@@ -871,27 +871,22 @@ class SmartAccountClient {
   }) {
     final buffered = estimate.withMultipliers(gasMultipliers);
 
-    // For paymaster gas limits:
-    // 1. If userOp already has values (from paymaster stub), keep them
-    // 2. If userOp doesn't have values, use bundler estimate if reasonable
-    // 3. Filter out obviously wrong values (< 10000 gas is too low)
+    // The stub only makes the operation estimable. Prefer valid bundler
+    // paymaster limits, falling back to the stub when the bundler omits them
+    // or returns an implausibly small value.
     final minPaymasterGas = BigInt.from(10000);
 
     var paymasterVerificationGas = userOp.paymasterVerificationGasLimit;
-    if (paymasterVerificationGas == null ||
-        paymasterVerificationGas < minPaymasterGas) {
-      final bundlerValue = buffered.paymasterVerificationGasLimit;
-      if (bundlerValue != null && bundlerValue >= minPaymasterGas) {
-        paymasterVerificationGas = bundlerValue;
-      }
+    final bundlerVerificationGas = buffered.paymasterVerificationGasLimit;
+    if (bundlerVerificationGas != null &&
+        bundlerVerificationGas >= minPaymasterGas) {
+      paymasterVerificationGas = bundlerVerificationGas;
     }
 
     var paymasterPostOpGas = userOp.paymasterPostOpGasLimit;
-    if (paymasterPostOpGas == null || paymasterPostOpGas < minPaymasterGas) {
-      final bundlerValue = buffered.paymasterPostOpGasLimit;
-      if (bundlerValue != null && bundlerValue >= minPaymasterGas) {
-        paymasterPostOpGas = bundlerValue;
-      }
+    final bundlerPostOpGas = buffered.paymasterPostOpGasLimit;
+    if (bundlerPostOpGas != null && bundlerPostOpGas >= minPaymasterGas) {
+      paymasterPostOpGas = bundlerPostOpGas;
     }
 
     return userOp.copyWith(

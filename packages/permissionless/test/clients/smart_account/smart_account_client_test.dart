@@ -273,6 +273,93 @@ void main() {
         expect(paymasterRequests[1]['method'], equals('pm_getPaymasterData'));
       });
 
+      test('uses bundler paymaster gas instead of stub limits', () async {
+        final bundler = createBundlerClient(
+          url: 'http://localhost:3000/rpc',
+          entryPoint: EntryPointAddresses.v07,
+          httpClient: MockClient((request) async {
+            final body = jsonDecode(request.body) as Map<String, dynamic>;
+            bundlerRequests.add(body);
+            final result = switch (body['method']) {
+              'eth_estimateUserOperationGas' => {
+                  'preVerificationGas': '0xeced',
+                  'verificationGasLimit': '0x066e2a',
+                  'callGasLimit': '0x01024c',
+                  'paymasterVerificationGasLimit': '0x011dce',
+                  'paymasterPostOpGasLimit': '0x0186a0',
+                },
+              'eth_sendUserOperation' => '0xabcdef1234567890',
+              _ => throw StateError('Unexpected bundler method'),
+            };
+            return http.Response(
+              jsonEncode({
+                'jsonrpc': '2.0',
+                'id': body['id'],
+                'result': result,
+              }),
+              200,
+            );
+          }),
+        );
+        final paymaster = createPaymasterClient(
+          url: 'http://localhost:3001/rpc',
+          httpClient: createPaymasterMock(
+            responseFactory: (body) => switch (body['method']) {
+              'pm_getPaymasterStubData' => {
+                  'paymaster': '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                  'paymasterData': '0xabcdef0123456789',
+                  'paymasterVerificationGasLimit': '0x30d40',
+                  'paymasterPostOpGasLimit': '0x30d40',
+                  'isFinal': false,
+                },
+              'pm_getPaymasterData' => {
+                  'paymaster': '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                  'paymasterData': '0xfedcba9876543210',
+                },
+              _ => throw StateError('Unexpected paymaster method'),
+            },
+          ),
+        );
+        final client = SmartAccountClient(
+          account: account,
+          bundler: bundler,
+          paymaster: paymaster,
+          publicClient: createPublicClientMock(),
+          gasMultipliers: GasMultipliers.none,
+        );
+        final calls = [Call(to: mockAddress)];
+        final prepared = await client.prepareUserOperationWithAuth(
+          calls: calls,
+          maxFeePerGas: BigInt.one,
+          maxPriorityFeePerGas: BigInt.one,
+          skipFinalPaymasterData: true,
+        );
+
+        expect(prepared.userOp.preVerificationGas, BigInt.from(60653));
+        expect(prepared.userOp.verificationGasLimit, BigInt.from(421418));
+        expect(prepared.userOp.callGasLimit, BigInt.from(66124));
+        expect(
+          prepared.userOp.paymasterVerificationGasLimit,
+          BigInt.from(73166),
+        );
+        expect(prepared.userOp.paymasterPostOpGasLimit, BigInt.from(100000));
+
+        await client.sendUserOperation(
+          calls: calls,
+          maxFeePerGas: BigInt.one,
+          maxPriorityFeePerGas: BigInt.one,
+          signature: '0x1234',
+        );
+        final finalRequest = (paymasterRequests.last['params'] as List).first
+            as Map<String, dynamic>;
+        final sentRequest = (bundlerRequests.last['params'] as List).first
+            as Map<String, dynamic>;
+        expect(finalRequest['paymasterVerificationGasLimit'], '0x11dce');
+        expect(finalRequest['paymasterPostOpGasLimit'], '0x186a0');
+        expect(sentRequest['paymasterVerificationGasLimit'], '0x11dce');
+        expect(sentRequest['paymasterPostOpGasLimit'], '0x186a0');
+      });
+
       test('skips final paymaster call when isFinal is true', () async {
         final bundler = createBundlerClient(
           url: 'http://localhost:3000/rpc',
